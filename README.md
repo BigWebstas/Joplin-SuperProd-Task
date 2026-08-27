@@ -63,11 +63,15 @@ Open **Joplin → Tools → Options → Super Productivity** and set:
 
 ## Usage
 
-Select a note, then run **Send note to Super Productivity** from:
+Run **Send note to Super Productivity** from:
 
+- **right-click on a note** in the note list (select several to send them all at once),
 - the **Note** menu,
 - the editor toolbar button, or
 - the editor right-click menu.
+
+Selecting multiple notes shows a single confirmation and then sends each one using your
+default settings and its own frontmatter.
 
 ## Development
 

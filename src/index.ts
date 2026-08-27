@@ -197,19 +197,31 @@ function applyParsedFields(
 	if (tagIds.length) taskBody.tagIds = tagIds;
 }
 
-async function sendNoteToSuperProductivity() {
-	const dialogs = joplin.views.dialogs;
-	const note = await joplin.workspace.selectedNote();
-	if (!note) {
-		await dialogs.showToast({ message: 'No note is selected.', type: ToastType.Error });
-		return;
-	}
+type Settings = Awaited<ReturnType<typeof getSettings>>;
 
-	const settings = await getSettings();
-	if (!settings.apiUrl) {
-		await dialogs.showMessageBox('Please set the Super Productivity API URL in Tools → Options → Super Productivity.');
-		return;
-	}
+interface NoteLite {
+	id: string;
+	title: string;
+	body: string;
+}
+
+interface SendOutcome {
+	ok: boolean;
+	title: string;
+	error?: string;
+	unmatchedTags: string[];
+}
+
+/**
+ * Builds and sends one note as a Super Productivity task. Returns `null` if the
+ * user cancelled the confirmation dialog; otherwise a result to report.
+ */
+async function processNote(
+	note: NoteLite,
+	settings: Settings,
+	interactive: boolean,
+): Promise<SendOutcome | null> {
+	const dialogs = joplin.views.dialogs;
 
 	// --- Frontmatter ---------------------------------------------------------
 	const fm = settings.parseFrontmatter
@@ -245,7 +257,7 @@ async function sendNoteToSuperProductivity() {
 	let applyParsed = true;
 
 	// --- Confirmation dialog ----------------------------------------------
-	if (settings.confirm) {
+	if (interactive) {
 		const options = [
 			`<option value="">(Default project / Inbox)</option>`,
 			...projects.map(
@@ -291,7 +303,7 @@ async function sendNoteToSuperProductivity() {
 			{ id: 'ok', title: 'Send' },
 		]);
 		const result = await dialogs.open(handle);
-		if (result.id !== 'ok') return;
+		if (result.id !== 'ok') return null;
 
 		const form = result.formData?.main || {};
 		title = (form.title || '').trim() || title;
@@ -315,13 +327,89 @@ async function sendNoteToSuperProductivity() {
 
 	try {
 		await spRequest(settings.apiUrl, settings.token, 'POST', '/tasks', taskBody);
-		let message = `Sent to Super Productivity: "${title}"`;
-		if (applyParsed && unmatchedTags.length) {
-			message += ` (no tag: ${unmatchedTags.join(', ')})`;
-		}
-		await dialogs.showToast({ message, type: ToastType.Success });
+		return { ok: true, title, unmatchedTags: applyParsed ? unmatchedTags : [] };
 	} catch (err) {
-		await dialogs.showMessageBox(`Failed to send note to Super Productivity.\n\n${(err as Error).message}`);
+		return { ok: false, title, error: (err as Error).message, unmatchedTags: [] };
+	}
+}
+
+/** Resolves the notes to act on: the right-clicked ones, or the selected note. */
+async function resolveTargetNotes(noteIds: string[]): Promise<NoteLite[]> {
+	let ids = noteIds && noteIds.length ? noteIds : [];
+	if (!ids.length) {
+		const selected = await joplin.workspace.selectedNote();
+		if (selected?.id) ids = [selected.id];
+	}
+
+	const notes: NoteLite[] = [];
+	for (const id of ids) {
+		try {
+			const n = await joplin.data.get(['notes', id], { fields: ['id', 'title', 'body'] });
+			notes.push({ id: n.id, title: n.title || '', body: n.body || '' });
+		} catch (err) {
+			console.warn('[send-to-super-productivity] Could not load note', id, err);
+		}
+	}
+	return notes;
+}
+
+/**
+ * Command entry point. When invoked from the note-list context menu Joplin
+ * passes `noteIds`; from the Note menu / toolbar / editor it passes nothing and
+ * we fall back to the selected note.
+ */
+async function sendNoteToSuperProductivity(noteIds?: string[]) {
+	const dialogs = joplin.views.dialogs;
+
+	const settings = await getSettings();
+	if (!settings.apiUrl) {
+		await dialogs.showMessageBox('Please set the Super Productivity API URL in Tools → Options → Super Productivity.');
+		return;
+	}
+
+	const notes = await resolveTargetNotes(noteIds || []);
+	if (!notes.length) {
+		await dialogs.showToast({ message: 'No note is selected.', type: ToastType.Error });
+		return;
+	}
+
+	// A single note gets the full editing dialog; a multi-select gets one
+	// up-front confirmation and is then sent non-interactively.
+	if (notes.length === 1) {
+		const outcome = await processNote(notes[0], settings, settings.confirm);
+		if (!outcome) return;
+		if (outcome.ok) {
+			let message = `Sent to Super Productivity: "${outcome.title}"`;
+			if (outcome.unmatchedTags.length) message += ` (no tag: ${outcome.unmatchedTags.join(', ')})`;
+			await dialogs.showToast({ message, type: ToastType.Success });
+		} else {
+			await dialogs.showMessageBox(`Failed to send note to Super Productivity.\n\n${outcome.error}`);
+		}
+		return;
+	}
+
+	const proceed = await dialogs.showMessageBox(
+		`Send ${notes.length} notes to Super Productivity as tasks?`,
+	);
+	if (proceed !== 0) return;
+
+	let sent = 0;
+	const failures: string[] = [];
+	for (const note of notes) {
+		const outcome = await processNote(note, settings, false);
+		if (outcome?.ok) sent++;
+		else failures.push(`${note.title || 'Untitled'}: ${outcome?.error || 'cancelled'}`);
+	}
+
+	if (failures.length) {
+		await dialogs.showMessageBox(
+			`Sent ${sent} of ${notes.length} notes.\n\nFailed:\n${failures.join('\n')}`,
+		);
+	} else {
+		await dialogs.showToast({
+			message: `Sent ${sent} notes to Super Productivity`,
+			type: ToastType.Success,
+		});
 	}
 }
 
@@ -411,7 +499,7 @@ joplin.plugins.register({
 			name: 'superProductivity.sendNote',
 			label: 'Send note to Super Productivity',
 			iconName: 'fas fa-check-double',
-			enabledCondition: 'oneNoteSelected',
+			enabledCondition: 'someNotesSelected',
 			execute: sendNoteToSuperProductivity,
 		});
 
@@ -419,6 +507,11 @@ joplin.plugins.register({
 			'superProductivity.sendNote.noteMenu',
 			'superProductivity.sendNote',
 			MenuItemLocation.Note,
+		);
+		await joplin.views.menuItems.create(
+			'superProductivity.sendNote.noteListContext',
+			'superProductivity.sendNote',
+			MenuItemLocation.NoteListContextMenu,
 		);
 		await joplin.views.menuItems.create(
 			'superProductivity.sendNote.editorContext',
