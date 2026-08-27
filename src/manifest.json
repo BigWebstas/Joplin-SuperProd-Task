@@ -1,0 +1,16 @@
+{
+	"manifest_version": 1,
+	"id": "com.jwebstas.joplinSuperProductivity",
+	"app_min_version": "3.7",
+	"version": "1.0.0",
+	"name": "Send to Super Productivity",
+	"description": "Send the current Joplin note to Super Productivity as a task via its local REST API",
+	"author": "jwebstas",
+	"homepage_url": "https://github.com/jwebstas/Joplin-SuperProd-Task",
+	"repository_url": "https://github.com/jwebstas/Joplin-SuperProd-Task",
+	"keywords": ["super-productivity", "task", "export", "rest-api"],
+	"categories": ["productivity"],
+	"screenshots": [],
+	"icons": {},
+	"promo_tile": {}
+}
