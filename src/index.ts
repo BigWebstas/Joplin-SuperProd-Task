@@ -23,6 +23,7 @@ const S_APPEND_LINK = 'superProductivity.appendJoplinLink';
 const S_BODY_MAX = 'superProductivity.bodyMaxLength';
 const S_PARSE_FRONTMATTER = 'superProductivity.parseFrontmatter';
 const S_STRIP_FRONTMATTER = 'superProductivity.stripFrontmatter';
+const S_DELETE_AFTER_SEND = 'superProductivity.deleteNoteAfterSend';
 
 interface SpNamed {
 	id: string;
@@ -46,6 +47,7 @@ async function getSettings() {
 		S_BODY_MAX,
 		S_PARSE_FRONTMATTER,
 		S_STRIP_FRONTMATTER,
+		S_DELETE_AFTER_SEND,
 	]);
 	return {
 		apiUrl: String(values[S_API_URL] || '').trim().replace(/\/+$/, ''),
@@ -57,6 +59,7 @@ async function getSettings() {
 		bodyMax: Number(values[S_BODY_MAX] || 0),
 		parseFrontmatter: !!values[S_PARSE_FRONTMATTER],
 		stripFrontmatter: !!values[S_STRIP_FRONTMATTER],
+		deleteAfterSend: !!values[S_DELETE_AFTER_SEND],
 	};
 }
 
@@ -396,6 +399,17 @@ async function resolveTargetNotes(noteIds: string[]): Promise<NoteLite[]> {
 	return notes;
 }
 
+/** Moves a note to the trash after it has been sent. Best-effort. */
+async function deleteNoteAfterSend(id: string): Promise<boolean> {
+	try {
+		await joplin.data.delete(['notes', id]);
+		return true;
+	} catch (err) {
+		console.warn('[send-to-super-productivity] Could not delete note', id, err);
+		return false;
+	}
+}
+
 /**
  * Command entry point. When invoked from the note-list context menu Joplin
  * passes `noteIds`; from the Note menu / toolbar / editor it passes nothing and
@@ -424,6 +438,11 @@ async function sendNoteToSuperProductivity(noteIds?: string[]) {
 		if (outcome.ok) {
 			let message = `Sent to Super Productivity: "${outcome.title}"`;
 			if (outcome.unmatchedTags.length) message += ` (no tag: ${outcome.unmatchedTags.join(', ')})`;
+			if (settings.deleteAfterSend) {
+				message += (await deleteNoteAfterSend(notes[0].id))
+					? ' — note moved to trash'
+					: ' — could not delete note';
+			}
 			await dialogs.showToast({ message, type: ToastType.Success });
 		} else {
 			await dialogs.showMessageBox(`Failed to send note to Super Productivity.\n\n${outcome.error}`);
@@ -437,20 +456,26 @@ async function sendNoteToSuperProductivity(noteIds?: string[]) {
 	if (proceed !== 0) return;
 
 	let sent = 0;
+	let deleted = 0;
 	const failures: string[] = [];
 	for (const note of notes) {
 		const outcome = await processNote(note, settings, false);
-		if (outcome?.ok) sent++;
-		else failures.push(`${note.title || 'Untitled'}: ${outcome?.error || 'cancelled'}`);
+		if (outcome?.ok) {
+			sent++;
+			if (settings.deleteAfterSend && (await deleteNoteAfterSend(note.id))) deleted++;
+		} else {
+			failures.push(`${note.title || 'Untitled'}: ${outcome?.error || 'cancelled'}`);
+		}
 	}
 
+	const deletedSuffix = settings.deleteAfterSend ? ` (${deleted} moved to trash)` : '';
 	if (failures.length) {
 		await dialogs.showMessageBox(
-			`Sent ${sent} of ${notes.length} notes.\n\nFailed:\n${failures.join('\n')}`,
+			`Sent ${sent} of ${notes.length} notes${deletedSuffix}.\n\nFailed:\n${failures.join('\n')}`,
 		);
 	} else {
 		await dialogs.showToast({
-			message: `Sent ${sent} notes to Super Productivity`,
+			message: `Sent ${sent} notes to Super Productivity${deletedSuffix}`,
 			type: ToastType.Success,
 		});
 	}
@@ -527,6 +552,14 @@ joplin.plugins.register({
 				section: SECTION,
 				public: true,
 				label: 'Remove the frontmatter block from the task notes',
+			},
+			[S_DELETE_AFTER_SEND]: {
+				value: false,
+				type: SettingItemType.Bool,
+				section: SECTION,
+				public: true,
+				label: 'Delete the Joplin note after it is sent successfully',
+				description: 'The note is moved to the trash only when the task was created in Super Productivity. Failed sends keep the note.',
 			},
 		});
 

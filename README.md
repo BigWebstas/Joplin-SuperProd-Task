@@ -60,6 +60,7 @@ Open **Joplin → Tools → Options → Super Productivity** and set:
 | Max note body length | `0` | `0` = no limit |
 | Parse YAML frontmatter | on | See "Frontmatter parsing" above |
 | Remove the frontmatter block from task notes | on | |
+| Delete the Joplin note after it is sent successfully | off | Moves the note to the trash; only runs when the task was created in Super Productivity |
 
 ## Usage
 
