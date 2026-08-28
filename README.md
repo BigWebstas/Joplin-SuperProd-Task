@@ -53,7 +53,7 @@ Open **Joplin → Tools → Options → Super Productivity** and set:
 |---|---|---|
 | Local REST API URL | `http://127.0.0.1:3876` | Base URL, no trailing slash |
 | Access token | *(empty)* | Paste the token from Super Productivity |
-| Default project ID | *(empty)* | Empty = Super Productivity default project / Inbox |
+| Default project | *(Default project / Inbox)* | Dropdown populated from Super Productivity's project list; run **Super Productivity: Refresh project list** from the command palette after adding projects or changing the URL / token |
 | Show a confirmation dialog before sending | on | Edit the title, choose a project, review parsed fields |
 | Include the note body as task notes | on | |
 | Append a link back to the Joplin note | on | Adds a `joplin://` link to the task notes |

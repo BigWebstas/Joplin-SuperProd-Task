@@ -125,6 +125,49 @@ async function spRequest<T>(
 	return payload;
 }
 
+/**
+ * Builds the value => label map for the "Default project" dropdown by asking
+ * Super Productivity for its project list. Falls back gracefully when the app
+ * is not reachable so a previously-picked project is never silently dropped.
+ */
+async function buildProjectOptions(
+	apiUrl: string,
+	token: string,
+	current: string,
+): Promise<Record<string, string>> {
+	const options: Record<string, string> = { '': '(Default project / Inbox)' };
+	const projects = apiUrl ? await fetchList(apiUrl, token, '/projects') : [];
+	for (const p of projects) options[p.id] = p.title || p.id;
+	if (current && !(current in options)) {
+		options[current] = `${current} (not found — is Super Productivity running?)`;
+	}
+	return options;
+}
+
+/** (Re-)registers the default-project setting as an enum with the given options. */
+async function registerProjectSetting(options: Record<string, string>): Promise<void> {
+	await joplin.settings.registerSettings({
+		[S_DEFAULT_PROJECT]: {
+			value: '',
+			type: SettingItemType.String,
+			section: SECTION,
+			public: true,
+			isEnum: true,
+			options,
+			label: 'Default project',
+			description:
+				'Project that new tasks are added to. A `project:` frontmatter key (matched by name) ' +
+				'overrides this. Run "Super Productivity: Refresh project list" from the command palette ' +
+				'after adding projects or changing the API URL / token.',
+		},
+	});
+}
+
+async function refreshProjectSetting(): Promise<void> {
+	const s = await getSettings();
+	await registerProjectSetting(await buildProjectOptions(s.apiUrl, s.token, s.defaultProjectId));
+}
+
 async function fetchList(apiUrl: string, token: string, path: string): Promise<SpNamed[]> {
 	try {
 		const r = await spRequest<SpNamed[]>(apiUrl, token, 'GET', path);
@@ -439,14 +482,6 @@ joplin.plugins.register({
 				label: 'Access token',
 				description: 'From Super Productivity: Settings → Misc → Access Token.',
 			},
-			[S_DEFAULT_PROJECT]: {
-				value: '',
-				type: SettingItemType.String,
-				section: SECTION,
-				public: true,
-				label: 'Default project ID (optional)',
-				description: 'Leave empty to use the Super Productivity default project / Inbox. A `project:` frontmatter key (matched by name) overrides this.',
-			},
 			[S_CONFIRM]: {
 				value: true,
 				type: SettingItemType.Bool,
@@ -492,6 +527,29 @@ joplin.plugins.register({
 				section: SECTION,
 				public: true,
 				label: 'Remove the frontmatter block from the task notes',
+			},
+		});
+
+		// Register the project dropdown, then fill it from a live project list.
+		await registerProjectSetting({ '': '(Default project / Inbox)' });
+		await refreshProjectSetting();
+
+		// Keep the dropdown in sync when the connection details change.
+		await joplin.settings.onChange(async ({ keys }) => {
+			if (keys.includes(S_API_URL) || keys.includes(S_TOKEN)) {
+				await refreshProjectSetting();
+			}
+		});
+
+		await joplin.commands.register({
+			name: 'superProductivity.refreshProjects',
+			label: 'Super Productivity: Refresh project list',
+			execute: async () => {
+				await refreshProjectSetting();
+				await joplin.views.dialogs.showToast({
+					message: 'Super Productivity project list refreshed.',
+					type: ToastType.Success,
+				});
 			},
 		});
 
