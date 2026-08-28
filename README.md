@@ -8,6 +8,8 @@ as a task, using Super Productivity's **local REST API**.
 - **Obsidian-style YAML frontmatter → task due date, scheduled time, time estimate, tags and project**
 - Optional link back to the Joplin note appended to the task notes
 - Optional confirmation dialog to edit the title, pick a target project and review the parsed fields
+- Optionally drop the task straight onto Super Productivity's **Today** list
+- Optionally delete (trash) the Joplin note once the task is created
 
 ## Frontmatter parsing
 
@@ -61,6 +63,7 @@ Open **Joplin → Tools → Options → Super Productivity** and set:
 | Parse YAML frontmatter | on | See "Frontmatter parsing" above |
 | Remove the frontmatter block from task notes | on | |
 | Delete the Joplin note after it is sent successfully | off | Moves the note to the trash; only runs when the task was created in Super Productivity |
+| Add the new task to Today | off | Sets the task's due day to today so it lands on the Today list; skipped when frontmatter already sets a due date. Can also be toggled per-send in the confirmation dialog. |
 
 ## Usage
 
@@ -88,6 +91,7 @@ pointing at this project folder, then restart Joplin.
 
 The plugin calls `POST /tasks` on the Super Productivity local REST API with a JSON body of
 `{ title, notes?, projectId?, dueDay?, dueWithTime?, plannedAt?, timeEstimate?, timeSpent?, tagIds? }`
+("Add to Today" simply sets `dueDay` to the current local date)
 and an `Authorization: Bearer <token>` header. Tag/project names are resolved to IDs via
 `GET /tags` and `GET /projects`. On desktop, Joplin plugin code runs in a Node context, so the
 loopback request is not subject to CORS.

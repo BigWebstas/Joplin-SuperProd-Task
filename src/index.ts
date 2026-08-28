@@ -24,6 +24,7 @@ const S_BODY_MAX = 'superProductivity.bodyMaxLength';
 const S_PARSE_FRONTMATTER = 'superProductivity.parseFrontmatter';
 const S_STRIP_FRONTMATTER = 'superProductivity.stripFrontmatter';
 const S_DELETE_AFTER_SEND = 'superProductivity.deleteNoteAfterSend';
+const S_ADD_TO_TODAY = 'superProductivity.addToToday';
 
 interface SpNamed {
 	id: string;
@@ -48,6 +49,7 @@ async function getSettings() {
 		S_PARSE_FRONTMATTER,
 		S_STRIP_FRONTMATTER,
 		S_DELETE_AFTER_SEND,
+		S_ADD_TO_TODAY,
 	]);
 	return {
 		apiUrl: String(values[S_API_URL] || '').trim().replace(/\/+$/, ''),
@@ -60,6 +62,7 @@ async function getSettings() {
 		parseFrontmatter: !!values[S_PARSE_FRONTMATTER],
 		stripFrontmatter: !!values[S_STRIP_FRONTMATTER],
 		deleteAfterSend: !!values[S_DELETE_AFTER_SEND],
+		addToToday: !!values[S_ADD_TO_TODAY],
 	};
 }
 
@@ -199,6 +202,13 @@ function resolveTagIds(names: string[], tags: SpNamed[]): { ids: string[]; unmat
 	return { ids, unmatched };
 }
 
+/** Today's date as `YYYY-MM-DD` in local time — Super Productivity's "Today" list key. */
+function todayDay(): string {
+	const d = new Date();
+	const p = (n: number) => String(n).padStart(2, '0');
+	return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 function escapeHtml(s: string): string {
 	return s
 		.replace(/&/g, '&amp;')
@@ -301,6 +311,7 @@ async function processNote(
 	let title: string = note.title || 'Untitled note';
 	let includeBody: boolean = settings.includeBody;
 	let applyParsed = true;
+	let addToToday: boolean = settings.addToToday;
 
 	// --- Confirmation dialog ----------------------------------------------
 	if (interactive) {
@@ -337,9 +348,13 @@ async function processNote(
 					<input type="checkbox" name="applyParsed" value="1" checked />
 					Apply detected date / time / tags to the task
 				</label>` : ''}
-				<label style="display:block;">
+				<label style="display:block;margin-bottom:6px;">
 					<input type="checkbox" name="includeBody" value="1"${includeBody ? ' checked' : ''} />
 					Include note content as task notes
+				</label>
+				<label style="display:block;">
+					<input type="checkbox" name="addToToday" value="1"${addToToday ? ' checked' : ''} />
+					Add the task to Today
 				</label>
 			</form>
 			`,
@@ -356,6 +371,7 @@ async function processNote(
 		projectId = (form.projectId || '').trim();
 		includeBody = !!form.includeBody;
 		applyParsed = parsed.detected.length ? !!form.applyParsed : false;
+		addToToday = !!form.addToToday;
 	}
 
 	// --- Build & send ------------------------------------------------------
@@ -370,6 +386,11 @@ async function processNote(
 	if (notes) taskBody.notes = notes;
 	if (projectId) taskBody.projectId = projectId;
 	if (applyParsed) applyParsedFields(taskBody, parsed, tagIds);
+
+	// Put the task on the Today list, unless a due date already scheduled it.
+	if (addToToday && taskBody.dueDay === undefined && taskBody.dueWithTime === undefined) {
+		taskBody.dueDay = todayDay();
+	}
 
 	try {
 		await spRequest(settings.apiUrl, settings.token, 'POST', '/tasks', taskBody);
@@ -560,6 +581,14 @@ joplin.plugins.register({
 				public: true,
 				label: 'Delete the Joplin note after it is sent successfully',
 				description: 'The note is moved to the trash only when the task was created in Super Productivity. Failed sends keep the note.',
+			},
+			[S_ADD_TO_TODAY]: {
+				value: false,
+				type: SettingItemType.Bool,
+				section: SECTION,
+				public: true,
+				label: 'Add the new task to Today',
+				description: 'Sets the task\'s due day to today so it appears on the Today list. Skipped when frontmatter already gives the task a due date.',
 			},
 		});
 
